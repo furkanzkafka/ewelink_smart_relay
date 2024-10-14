@@ -1,0 +1,224 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Door Access Control</title>
+
+    <style>
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+
+</head>
+<body>
+<h1>Door Access Control</h1>
+{% csrf_token %}
+<button id="actionButton" onclick="handleAction()">Generate Access Token</button>
+<div id="spinner" class="spinner"></div>
+<div id="countdown"></div>
+<div id="message"></div>
+
+
+    <script>
+         let countdownInterval;
+    let expirationTime;
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    const csrftoken = getCookie('csrftoken');
+
+    function handleAction() {
+        const actionButton = document.getElementById('actionButton');
+        if (actionButton.textContent === 'Generate Access Token') {
+            generateAccess();
+        } else if (actionButton.textContent === 'Unlock Door') {
+            unlockDoor();
+        }
+    }
+
+    function checkExistingToken() {
+    updateUI('loading');
+    fetch('/generate/', {
+        credentials: 'include'  // This ensures cookies are sent with the request
+    })
+        .then(response => {
+            console.log('Check token response status:', response.status);
+            console.log('Check token response headers:', response.headers);
+            return response.text();
+        })
+        .then(text => {
+            console.log('Check token response text:', text);
+            return JSON.parse(text);
+        })
+        .then(data => {
+            if (data.token) {
+                expirationTime = new Date(data.expires_at);
+                updateUI('token');
+                startCountdown();
+            } else {
+                updateUI('generate');
+            }
+        })
+        .catch(error => {
+            console.error('Error checking existing token:', error);
+            setMessage('Error checking token: ' + error.message);
+            updateUI('generate');
+        });
+}
+
+    function generateAccess() {
+    updateUI('loading');
+    fetch('/generate/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrftoken,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+        credentials: 'include'  // This ensures cookies are sent with the request
+    })
+        .then(response => {
+            console.log('Response status:', response.status);
+            console.log('Response headers:', response.headers);
+            return response.text();  // Get the raw text of the response
+        })
+        .then(text => {
+            console.log('Response text:', text);
+            try {
+                return JSON.parse(text);  // Try to parse it as JSON
+            } catch (e) {
+                throw new Error('Invalid JSON response: ' + text);
+            }
+        })
+        .then(data => {
+            if (data.token) {
+                expirationTime = new Date(data.expires_at);
+                updateUI('token');
+                startCountdown();
+            } else if (data.error === 'Active token already exists') {
+                checkExistingToken();
+            } else {
+                setMessage(data.error || 'Failed to generate token');
+                updateUI('generate');
+            }
+        })
+        .catch(error => {
+            console.error('Error generating access:', error);
+            setMessage('An error occurred: ' + error.message);
+            updateUI('generate');
+        });
+}
+    function unlockDoor() {
+        updateUI('loading');
+        fetch('/unlock/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrftoken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    setMessage('Door unlocked successfully!');
+                    updateUI('token');
+                } else {
+                    setMessage(data.message || 'Failed to unlock door');
+                    checkExistingToken(); // Check if token is still valid
+                }
+            })
+            .catch(error => {
+                console.error('Error unlocking door:', error);
+                setMessage('An error occurred');
+                checkExistingToken(); // Check if token is still valid
+            });
+    }
+
+    function startCountdown() {
+        clearInterval(countdownInterval);
+        countdownInterval = setInterval(updateCountdown, 1000);
+        updateCountdown();
+    }
+
+    function updateCountdown() {
+        const countdown = document.getElementById('countdown');
+        if (!countdown) return;
+
+        const now = new Date();
+        const timeLeft = expirationTime - now;
+
+        if (timeLeft <= 0) {
+            clearInterval(countdownInterval);
+            updateUI('generate');
+            setMessage('Token expired');
+        } else {
+            const minutes = Math.floor(timeLeft / 60000);
+            const seconds = Math.floor((timeLeft % 60000) / 1000);
+            countdown.textContent = `Time left: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+    }
+
+    function updateUI(state) {
+        const actionButton = document.getElementById('actionButton');
+        const spinner = document.getElementById('spinner');
+        const countdown = document.getElementById('countdown');
+
+        if (actionButton) {
+            if (state === 'generate') {
+                actionButton.textContent = 'Generate Access Token';
+                actionButton.style.display = 'inline-block';
+            } else if (state === 'token') {
+                actionButton.textContent = 'Unlock Door';
+                actionButton.style.display = 'inline-block';
+            } else {
+                actionButton.style.display = 'none';
+            }
+        }
+
+        if (spinner) spinner.style.display = state === 'loading' ? 'block' : 'none';
+        if (countdown) countdown.style.display = state === 'token' ? 'block' : 'none';
+    }
+
+    function setMessage(text) {
+        const message = document.getElementById('message');
+        if (message) message.textContent = text;
+    }
+
+    // Call checkExistingToken when the page loads
+    document.addEventListener('DOMContentLoaded', checkExistingToken);
+    </script>
+</body>
+</html>

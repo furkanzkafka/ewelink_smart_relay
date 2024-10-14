@@ -1,0 +1,9 @@
+*.pyc
+__pycache__
+db.sqlite3
+.env
+*.log
+.vscode
+*.pyo
+*.pyd
+local_settings.py
